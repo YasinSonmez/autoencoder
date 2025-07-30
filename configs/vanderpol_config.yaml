@@ -1,0 +1,90 @@
+# Van der Pol System - State-Space Manifold Learning
+system_name: "vanderpol_manifold"
+
+# Van der Pol System Definition
+dynamics:
+  type: "vanderpol"
+  parameters:
+    mu: 2.0
+
+# Initial Conditions Sampling
+initial_conditions:
+  bounds:
+    x: [-3.0, 3.0]
+    y: [-3.0, 3.0]
+  num_samples: 500
+  sampling_method: "random"
+
+# Trajectory Generation
+trajectory:
+  time_span: [0.0, 20.0]
+  time_points: 800
+  solver: "RK45"
+  rtol: 0.00000001
+  atol: 0.0000000001
+  normalize: true
+  remove_transient: 100
+
+# Dataset Configuration
+dataset:
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  shuffle: true
+  random_seed: 42
+
+# State-Space Autoencoder (2D -> 1D manifold)
+autoencoder:
+  latent_dim: 1
+  
+  encoder:
+    hidden_layers: [16, 8]
+    activation: "relu"
+    dropout: 0.0
+    batch_norm: false
+  
+  decoder:
+    hidden_layers: [8, 16]
+    activation: "relu"
+    dropout: 0.0
+    batch_norm: false
+    output_activation: "linear"
+
+# Training Configuration
+training:
+  batch_size: 512
+  epochs: 100
+  learning_rate: 0.001
+  optimizer: "adam"
+  scheduler:
+    type: "step"
+    step_size: 30
+    gamma: 0.5
+  loss_function: "mse"
+  early_stopping:
+    patience: 15
+    min_delta: 0.000001
+  save_best_model: true
+
+# Evaluation Configuration
+evaluation:
+  metrics:
+    - "reconstruction_error"
+    - "manifold_quality"
+    - "pca_comparison"
+  
+  visualization:
+    plot_manifold: true
+    plot_reconstruction: true
+    plot_trajectories: true
+    save_plots: true
+    plot_format: "png"
+    dpi: 300
+
+# Output Configuration
+output:
+  base_dir: "results"
+  experiment_name: "vanderpol_manifold"
+  save_model: true
+  save_embeddings: true
+  generate_report: true 
