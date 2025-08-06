@@ -1,34 +1,35 @@
-# 3D Linear System - State-Space Manifold Learning
-system_name: "linear_manifold"
+# Lorenz System - State-Space Manifold Learning with Comparison Mode
+system_name: "lorenz_manifold"
 
-# Training Mode: "reconstruction" or "prediction"
-mode: "reconstruction"
+# Training Mode: "reconstruction", "prediction", or "comparison"
+mode: "comparison"
 
-# 3D Linear System Definition: dy/dt = A*y
+# Lorenz System Definition
 dynamics:
-  type: "linear"
+  type: "lorenz"
   parameters:
-    mu: -0.05      # Parameter μ in the system matrix
-    lambda: -1  # Parameter λ in the system matrix
+    sigma: 10.0
+    rho: 28.0
+    beta: 2.667
 
 # Initial Conditions Sampling
 initial_conditions:
   bounds:
-    y1: [-4.0, 4.0]
-    y2: [-4.0, 4.0]
-    y3: [-4.0, 4.0]
+    x: [-15.0, 15.0]
+    y: [-20.0, 20.0] 
+    z: [5.0, 35.0]
   num_samples: 500
-  sampling_method: "grid"
+  sampling_method: "random"
 
 # Trajectory Generation
 trajectory:
-  time_span: [0.0, 80.0]
+  time_span: [0.0, 10.0]
   time_points: 500
   solver: "RK45"
   rtol: 0.00000001
   atol: 0.0000000001
-  normalize: false
-  remove_transient: 30
+  normalize: true
+  remove_transient: 50
 
 # Dataset Configuration
 dataset:
@@ -44,13 +45,13 @@ autoencoder:
   
   encoder:
     hidden_layers: [64, 32]
-    activation: "tanh"
+    activation: "relu"
     dropout: 0.0
     batch_norm: false
   
   decoder:
     hidden_layers: [32, 64]
-    activation: "tanh"
+    activation: "relu"
     dropout: 0.0
     batch_norm: false
     output_activation: "linear"
@@ -58,13 +59,19 @@ autoencoder:
   # Latent dynamics network (only used in prediction mode)
   latent_dynamics:
     hidden_layers: [64, 64]
+    activation: "relu"
+    dropout: 0.0
+  
+  # MLP dynamics network for comparison (operates directly in state space)
+  mlp_dynamics:
+    hidden_layers: [64, 64]
     activation: "tanh"
     dropout: 0.0
 
 # Training Configuration
 training:
   batch_size: 512
-  epochs: 150
+  epochs: 10
   learning_rate: 0.001
   optimizer: "adam"
   scheduler:
@@ -83,8 +90,10 @@ training:
     prediction_weight: 1.0      # Weight for prediction loss
     
     # Multi-step prediction settings
-    prediction_steps: 1         # Number of future steps to predict (k=1 for single-step)
-    decay_factor: 1.0          # Exponential decay factor (gamma=1.0 for single-step)
+    prediction_steps: 3         # Number of future steps to predict (k)
+    decay_factor: 0.9          # Exponential decay factor (gamma) for multi-step loss
+                               # Loss = w1*L(t+1) + w2*L(t+2) + ... + wk*L(t+k)
+                               # where wi = gamma^(i-1)
 
 # Evaluation Configuration
 evaluation:
@@ -104,7 +113,7 @@ evaluation:
 # Output Configuration
 output:
   base_dir: "results"
-  experiment_name: "linear_manifold"
+  experiment_name: "lorenz_manifold"
   save_model: true
   save_embeddings: true
   generate_report: true 

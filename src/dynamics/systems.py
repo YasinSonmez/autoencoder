@@ -170,6 +170,37 @@ class LinearSystem(DynamicalSystem):
         return ['y1', 'y2', 'y3']
 
 
+class BruntonSystem(DynamicalSystem):
+    """Brunton system: dx₁/dt = μx₁, dx₂/dt = λ(x₂ - x₁²)"""
+    
+    def __init__(self, parameters: Dict[str, float] = None):
+        """Initialize Brunton system.
+        
+        Args:
+            parameters: System parameters (mu, lambda)
+        """
+        default_params = {'mu': -0.05, 'lambda': -1.0}
+        if parameters:
+            default_params.update(parameters)
+        super().__init__(default_params)
+    
+    def dynamics(self, t: float, state: np.ndarray) -> np.ndarray:
+        """Compute Brunton system dynamics."""
+        x1, x2 = state
+        mu, lam = self.parameters['mu'], self.parameters['lambda']
+        
+        dx1dt = mu * x1
+        dx2dt = lam * (x2 - x1**2)
+        
+        return np.array([dx1dt, dx2dt])
+    
+    def get_state_dimension(self) -> int:
+        return 2
+    
+    def get_state_names(self) -> List[str]:
+        return ['x1', 'x2']
+
+
 class CustomSystem(DynamicalSystem):
     """Custom dynamical system defined by user equations."""
     
@@ -217,6 +248,8 @@ def create_system(system_type: str, config: Dict[str, Any]) -> DynamicalSystem:
         return VanDerPolSystem(parameters)
     elif system_type == 'linear':
         return LinearSystem(parameters)
+    elif system_type == 'brunton':
+        return BruntonSystem(parameters)
     elif system_type == 'custom':
         # For custom systems, execute the custom equations
         custom_code = config.get('custom_equations', '')
@@ -257,5 +290,10 @@ PREDEFINED_SYSTEMS = {
         'class': VanDerPolSystem,
         'default_params': {'mu': 1.0},
         'typical_bounds': {'x': [-3, 3], 'y': [-3, 3]}
+    },
+    'brunton': {
+        'class': BruntonSystem,
+        'default_params': {'mu': -0.05, 'lambda': -1.0},
+        'typical_bounds': {'x1': [-4, 4], 'x2': [-4, 4]}
     }
 } 

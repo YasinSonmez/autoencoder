@@ -15,9 +15,14 @@ class Config:
         Args:
             config_path: Path to the configuration YAML file
         """
+        from datetime import datetime
+        
         self.config_path = Path(config_path)
         self.config = self._load_config()
         self._validate_config()
+        
+        # Generate timestamp once at initialization for consistent folder naming
+        self._cached_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from YAML file."""
@@ -54,7 +59,7 @@ class Config:
         if 'type' not in dynamics:
             raise ValueError("Dynamics type must be specified")
         
-        if dynamics['type'] not in ['lorenz', 'rossler', 'vanderpol', 'linear', 'custom']:
+        if dynamics['type'] not in ['lorenz', 'rossler', 'vanderpol', 'linear', 'brunton', 'custom']:
             raise ValueError("Invalid dynamics type")
         
         if dynamics['type'] == 'custom' and 'custom_equations' not in dynamics:
@@ -121,11 +126,18 @@ class Config:
             yaml.dump(self.config, f, default_flow_style=False, indent=2)
     
     def create_output_dir(self) -> Path:
-        """Create output directory structure."""
+        """Create output directory structure with timestamp to avoid overwriting."""
+        from datetime import datetime
+        
         base_dir = Path(self.get('output.base_dir', 'results'))
         exp_name = self.get('output.experiment_name', 'experiment')
         
-        output_dir = base_dir / exp_name
+        # Use the cached timestamp generated at initialization
+        
+        mode = self.get('mode', 'reconstruction')
+        timestamped_name = f"{exp_name}_{mode}_{self._cached_timestamp}"
+        
+        output_dir = base_dir / exp_name / timestamped_name
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Create subdirectories
@@ -133,6 +145,7 @@ class Config:
         (output_dir / 'plots').mkdir(exist_ok=True)
         (output_dir / 'data').mkdir(exist_ok=True)
         (output_dir / 'logs').mkdir(exist_ok=True)
+        (output_dir / 'data_inspection').mkdir(exist_ok=True)
         
         return output_dir
     
@@ -142,4 +155,8 @@ class Config:
     
     def __setitem__(self, key: str, value: Any):
         """Allow dictionary-style setting."""
-        self.set(key, value) 
+        self.set(key, value)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Return the configuration as a dictionary."""
+        return self.config 

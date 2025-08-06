@@ -1,8 +1,8 @@
 # 3D Linear System - State-Space Manifold Learning
 system_name: "linear_manifold"
 
-# Training Mode: "reconstruction" or "prediction"
-mode: "reconstruction"
+# Training Mode: "reconstruction", "prediction", or "comparison"
+mode: "comparison"
 
 # 3D Linear System Definition: dy/dt = A*y
 dynamics:
@@ -60,11 +60,17 @@ autoencoder:
     hidden_layers: [64, 64]
     activation: "tanh"
     dropout: 0.0
+  
+  # MLP dynamics network for comparison (operates directly in state space)
+  mlp_dynamics:
+    hidden_layers: [64, 64]
+    activation: "tanh"
+    dropout: 0.0
 
 # Training Configuration
 training:
   batch_size: 512
-  epochs: 150
+  epochs: 10
   learning_rate: 0.001
   optimizer: "adam"
   scheduler:
@@ -83,8 +89,10 @@ training:
     prediction_weight: 1.0      # Weight for prediction loss
     
     # Multi-step prediction settings
-    prediction_steps: 1         # Number of future steps to predict (k=1 for single-step)
-    decay_factor: 1.0          # Exponential decay factor (gamma=1.0 for single-step)
+    prediction_steps: 3         # Number of future steps to predict (k)
+    decay_factor: 0.9          # Exponential decay factor (gamma) for multi-step loss
+                               # Loss = w1*L(t+1) + w2*L(t+2) + ... + wk*L(t+k)
+                               # where wi = gamma^(i-1)
 
 # Evaluation Configuration
 evaluation:

@@ -12,7 +12,7 @@ sys.path.append(str(Path(__file__).parent / 'src'))
 from src.utils.config import Config
 from src.utils.visualization import plot_trajectory_data, ask_user_approval
 from src.dynamics.simulator import generate_dataset, load_dataset
-from src.training.state_trainer import StateAutoencoderTrainer
+from src.training.state_trainer import create_trainer
 from src.training.state_evaluator import StateAutoencoderEvaluator
 
 
@@ -116,14 +116,17 @@ def main():
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         # Create trainer
-        trainer = StateAutoencoderTrainer(config, dataset, device=device)
+        trainer = create_trainer(config, dataset, device=device)
         
-        # Train model
-        training_results = trainer.train()
-        
-        print(f"Training completed!")
-        print(f"Best validation loss: {training_results['best_val_loss']:.6f}")
-        print(f"Test loss: {training_results['test_loss']:.6f}")
+        # Train model(s)
+        if config.get('mode') == 'comparison':
+            training_results = trainer.train_both_models()
+            print("Comparison training completed!")
+        else:
+            training_results = trainer.train()
+            print(f"Training completed!")
+            print(f"Best validation loss: {training_results['best_val_loss']:.6f}")
+            print(f"Test loss: {training_results.get('test_loss', training_results.get('final_test_loss')):.6f}")
         
         # Step 3: Manifold Evaluation
         print("\n" + "="*60)

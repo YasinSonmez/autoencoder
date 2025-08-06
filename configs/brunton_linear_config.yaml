@@ -1,22 +1,21 @@
-# 3D Linear System - State-Space Manifold Learning
-system_name: "linear_manifold"
+# 2D Brunton System - Linear Latent Dynamics
+system_name: "brunton_linear_manifold"
 
-# Training Mode: "reconstruction" or "prediction"
-mode: "reconstruction"
+# Training Mode: "prediction" with linear latent dynamics
+mode: "prediction"
 
-# 3D Linear System Definition: dy/dt = A*y
+# 2D Brunton System Definition: dx₁/dt = μx₁, dx₂/dt = λ(x₂ - x₁²)
 dynamics:
-  type: "linear"
+  type: "brunton"
   parameters:
-    mu: -0.05      # Parameter μ in the system matrix
-    lambda: -1  # Parameter λ in the system matrix
+    mu: -0.05      # Parameter μ in the first equation
+    lambda: -1.0   # Parameter λ in the second equation
 
 # Initial Conditions Sampling
 initial_conditions:
   bounds:
-    y1: [-4.0, 4.0]
-    y2: [-4.0, 4.0]
-    y3: [-4.0, 4.0]
+    x1: [-4.0, 4.0]
+    x2: [-4.0, 4.0]
   num_samples: 500
   sampling_method: "grid"
 
@@ -28,7 +27,7 @@ trajectory:
   rtol: 0.00000001
   atol: 0.0000000001
   normalize: false
-  remove_transient: 30
+  remove_transient: 0
 
 # Dataset Configuration
 dataset:
@@ -38,33 +37,32 @@ dataset:
   shuffle: true
   random_seed: 42
 
-# State-Space Autoencoder (3D -> 2D manifold)
+# State-Space Autoencoder (2D -> 3D manifold with linear dynamics)
 autoencoder:
-  latent_dim: 2
+  latent_dim: 3
   
   encoder:
     hidden_layers: [64, 32]
-    activation: "tanh"
+    activation: "relu"
     dropout: 0.0
     batch_norm: false
   
   decoder:
     hidden_layers: [32, 64]
-    activation: "tanh"
+    activation: "relu"
     dropout: 0.0
     batch_norm: false
     output_activation: "linear"
   
-  # Latent dynamics network (only used in prediction mode)
+  # Linear latent dynamics: z_k+1 = A * z_k
   latent_dynamics:
-    hidden_layers: [64, 64]
-    activation: "tanh"
-    dropout: 0.0
+    linear: true  # Enable linear latent dynamics
+    # Note: When linear=true, hidden_layers, activation, dropout are ignored
 
 # Training Configuration
 training:
   batch_size: 512
-  epochs: 150
+  epochs: 50
   learning_rate: 0.001
   optimizer: "adam"
   scheduler:
@@ -77,14 +75,14 @@ training:
     min_delta: 0.000001
   save_best_model: true
   
-  # Prediction mode settings (only used when mode: "prediction")
+  # Prediction mode settings
   prediction:
     reconstruction_weight: 1.0  # Weight for reconstruction loss
     prediction_weight: 1.0      # Weight for prediction loss
     
     # Multi-step prediction settings
-    prediction_steps: 1         # Number of future steps to predict (k=1 for single-step)
-    decay_factor: 1.0          # Exponential decay factor (gamma=1.0 for single-step)
+    prediction_steps: 5         # Number of future steps to predict
+    decay_factor: 0.9          # Exponential decay factor
 
 # Evaluation Configuration
 evaluation:
@@ -104,7 +102,7 @@ evaluation:
 # Output Configuration
 output:
   base_dir: "results"
-  experiment_name: "linear_manifold"
+  experiment_name: "brunton_linear_manifold"
   save_model: true
   save_embeddings: true
   generate_report: true 
