@@ -111,7 +111,11 @@ class BaseStateTrainer:
                                for step in range(k_steps))
                 pred_loss /= sum(decay_factor ** step for step in range(k_steps))
             
-            total_loss = recon_loss + pred_loss
+            # Get weights from config
+            recon_weight = self.config['training'].get('prediction', {}).get('reconstruction_weight', 1.0)
+            pred_weight = self.config['training'].get('prediction', {}).get('prediction_weight', 1.0)
+            
+            total_loss = recon_weight * recon_loss + pred_weight * pred_loss
             return (total_loss, recon_loss, pred_loss) if return_components else total_loss
         
         else:

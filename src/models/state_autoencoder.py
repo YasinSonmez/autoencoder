@@ -6,6 +6,50 @@ from typing import Dict, Any, Tuple, List
 import numpy as np
 
 
+class AlmostIdentityLinear(nn.Module):
+    """Linear map y = A x with A equal to identity except one learnable entry.
+
+    - If variable_index = (i, i), then A[i, i] is learnable (initialized to 1.0), others are fixed to identity.
+    - If variable_index = (i, j) with i != j, then A = I + a * E_{i,j} so only off-diagonal (i,j) is learnable.
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        variable_index: tuple[int, int] = (0, 0),
+        init_value: float = 1.0,
+        requires_grad: bool = True,
+    ) -> None:
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.row_index, self.col_index = variable_index
+        # Single scalar parameter controlling the variable entry
+        self.a = nn.Parameter(torch.tensor(float(init_value), dtype=torch.float32))
+        self.a.requires_grad = requires_grad
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Efficient application without constructing full matrix each time
+        if self.row_index == self.col_index:
+            # Diagonal element variable: y = I x with y[:,i] = a * x[:,i]
+            y = x.clone()
+            y[:, self.row_index] = self.a * x[:, self.row_index]
+            return y
+        else:
+            # Off-diagonal element variable: y = x + a * e_i e_j^T x => y_i += a * x_j
+            y = x.clone()
+            y[:, self.row_index] = x[:, self.row_index] + self.a * x[:, self.col_index]
+            return y
+
+    @torch.no_grad()
+    def get_matrix(self) -> torch.Tensor:
+        A = torch.eye(self.latent_dim, dtype=torch.float32)
+        if self.row_index == self.col_index:
+            A[self.row_index, self.col_index] = self.a.detach()
+        else:
+            A[self.row_index, self.col_index] = self.a.detach()
+        return A
+
+
 class StateAutoencoder(nn.Module):
     """Autoencoder for individual state points (not trajectories)."""
     
@@ -80,12 +124,25 @@ class StateAutoencoder(nn.Module):
             
             # Check if linear latent dynamics is enabled
             if dynamics_config.get('linear', False):
-                # Linear latent dynamics: z_k+1 = A * z_k
-                self.latent_dynamics = nn.Linear(self.latent_dim, self.latent_dim, bias=False)
-                # Initialize with identity matrix
-                with torch.no_grad():
-                    self.latent_dynamics.weight.data = torch.eye(self.latent_dim)
-                self.linear_dynamics = True
+                # Option: keep A as identity but allow a single diagonal (e.g., 3,3) entry to be learnable
+                allow_single_diag = dynamics_config.get('allow_single_diagonal_variable', False)
+                if allow_single_diag:
+                    # 1-based index in config for user friendliness; convert to 0-based
+                    diag_index = int(dynamics_config.get('variable_diagonal_index', 3)) - 1
+                    diag_index = max(0, min(diag_index, self.latent_dim - 1))
+                    self.latent_dynamics = AlmostIdentityLinear(self.latent_dim, variable_index=(diag_index, diag_index))
+                    self.linear_dynamics = True
+                else:
+                    # Linear latent dynamics: z_k+1 = A * z_k using a standard Linear layer
+                    self.latent_dynamics = nn.Linear(self.latent_dim, self.latent_dim, bias=False)
+                    # Initialize with identity matrix and optionally freeze updates
+                    with torch.no_grad():
+                        self.latent_dynamics.weight.copy_(torch.eye(self.latent_dim))
+                    # Default behavior: keep A fixed to identity (no updates during training)
+                    freeze_A = dynamics_config.get('freeze_A', True)
+                    if freeze_A:
+                        self.latent_dynamics.weight.requires_grad = False
+                    self.linear_dynamics = True
             else:
                 # Nonlinear latent dynamics (original implementation)
                 dynamics_layers = []
@@ -260,7 +317,12 @@ class StateAutoencoder(nn.Module):
                 info['linear_dynamics'] = True  # Add this flag
                 # Get the A matrix
                 with torch.no_grad():
-                    A_matrix = self.latent_dynamics.weight.data.cpu().numpy()
+                    if isinstance(self.latent_dynamics, AlmostIdentityLinear):
+                        A_matrix = self.latent_dynamics.get_matrix().cpu().numpy()
+                    elif isinstance(self.latent_dynamics, nn.Linear):
+                        A_matrix = self.latent_dynamics.weight.data.cpu().numpy()
+                    else:
+                        A_matrix = None
                     info['A_matrix'] = A_matrix
             else:
                 info['latent_dynamics_type'] = 'nonlinear'

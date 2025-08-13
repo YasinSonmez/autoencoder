@@ -59,7 +59,7 @@ class Config:
         if 'type' not in dynamics:
             raise ValueError("Dynamics type must be specified")
         
-        if dynamics['type'] not in ['lorenz', 'rossler', 'vanderpol', 'linear', 'brunton', 'custom']:
+        if dynamics['type'] not in ['lorenz', 'rossler', 'vanderpol', 'linear', 'brunton', 'nonlinear_transformed', 'custom']:
             raise ValueError("Invalid dynamics type")
         
         if dynamics['type'] == 'custom' and 'custom_equations' not in dynamics:

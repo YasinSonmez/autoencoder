@@ -1,27 +1,32 @@
-# 2D Brunton System - Linear Latent Dynamics
-system_name: "brunton_linear_manifold"
+# 3D Nonlinear Transformed System - Differentiable Injection Example
+system_name: "nonlinear_transformed_example"
 
-# Training Mode: "prediction" with linear latent dynamics
-mode: "prediction"
+# Training Mode: "reconstruction" (we'll just generate and plot for now)
+mode: "reconstruction"
 
-# 2D Brunton System Definition: dx₁/dt = μx₁, dx₂/dt = λ(x₂ - x₁²)
+# 3D Nonlinear Transformed System Definition
+# Based on: dx/dt = J_F(x)^(-1) * A * F(x)
+# where F(x) = [f1(x1); f2(x2); f3(x3)] is a component-wise transformation
 dynamics:
-  type: "brunton"
+  type: "nonlinear_transformed"
   parameters:
-    mu: -0.05      # Parameter μ in the first equation
-    lambda: -1.0   # Parameter λ in the second equation
+    mu: -0.2       # Parameter μ in the linear system matrix A (eigenvalue 1)
+    lambda: -0.4   # Parameter λ in the linear system matrix A (eigenvalue 2)
+    alpha: 0.6     # Nonlinearity strength for coordinate transformation
+    beta: 0.8      # Additional nonlinearity parameter
 
 # Initial Conditions Sampling
 initial_conditions:
   bounds:
     x1: [-4.0, 4.0]
     x2: [-4.0, 4.0]
+    x3: [-4.0, 4.0]
   num_samples: 500
   sampling_method: "grid"
 
 # Trajectory Generation
 trajectory:
-  time_span: [0.0, 80.0]
+  time_span: [0.0, 20.0]
   time_points: 500
   solver: "RK45"
   rtol: 0.00000001
@@ -37,29 +42,28 @@ dataset:
   shuffle: true
   random_seed: 42
 
-# State-Space Autoencoder (2D -> 3D manifold with linear dynamics)
+# State-Space Autoencoder (3D -> 2D manifold)
 autoencoder:
-  latent_dim: 3
+  latent_dim: 2
   
   encoder:
     hidden_layers: [64, 32]
-    activation: "relu"
+    activation: "tanh"
     dropout: 0.0
     batch_norm: false
   
   decoder:
     hidden_layers: [32, 64]
-    activation: "relu"
+    activation: "tanh"
     dropout: 0.0
     batch_norm: false
     output_activation: "linear"
   
-  # Linear latent dynamics: z_k+1 = A * z_k
+  # Latent dynamics network (only used in prediction mode)
   latent_dynamics:
-    linear: true  # Enable linear latent dynamics
-    freeze_A: false
-    allow_single_diagonal_variable: true
-    # Note: When linear=true, hidden_layers, activation, dropout are ignored
+    hidden_layers: [64, 64]
+    activation: "tanh"
+    dropout: 0.0
 
 # Training Configuration
 training:
@@ -69,22 +73,21 @@ training:
   optimizer: "adam"
   scheduler:
     type: "step"
-    step_size: 40
+    step_size: 20
     gamma: 0.7
   loss_function: "mse"
   early_stopping:
-    patience: 20
+    patience: 10
     min_delta: 0.000001
   save_best_model: true
   
-  # Prediction mode settings
+  # Prediction mode settings (only used when mode: "prediction")
   prediction:
     reconstruction_weight: 1.0  # Weight for reconstruction loss
-    prediction_weight: 100.0      # Weight for prediction loss
+    prediction_weight: 1.0      # Weight for prediction loss
     
     # Multi-step prediction settings
-    prediction_steps: 10         # Number of future steps to predict
-    plot_prediction_steps: 10
+    prediction_steps: 3         # Number of future steps to predict
     decay_factor: 0.9          # Exponential decay factor
 
 # Evaluation Configuration
@@ -105,7 +108,7 @@ evaluation:
 # Output Configuration
 output:
   base_dir: "results"
-  experiment_name: "brunton_linear_manifold"
+  experiment_name: "nonlinear_transformed_example"
   save_model: true
   save_embeddings: true
   generate_report: true 

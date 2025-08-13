@@ -466,77 +466,103 @@ class StateAutoencoderEvaluator:
             plt.close()
     
     def plot_dynamics_prediction_comparison(self):
-        """Plot dynamics prediction one time step ahead for prediction mode."""
+        """Plot dynamics prediction K steps ahead (K=1 defaults to one-step)."""
         if self.trainer.mode != "prediction":
             return  # Only for prediction mode
-        
+
+        # Determine horizon K from training config (fallback to 1)
+        k_steps = self.config.get('training', {}).get('prediction', {}).get('plot_prediction_steps', 1)
+
         # Use the test trajectories
         test_trajectories = self.trainer.test_trajectories
         num_traj, time_points, _ = test_trajectories.shape
-        
-        # Get dynamics predictions (one step ahead for each timestep)
-        predictions = []
+
         import torch
         self.trainer.model.eval()
-        
+
+        predictions = []
         with torch.no_grad():
             for trajectory in test_trajectories:
                 pred_traj = []
-                
-                # For each time step, predict one step ahead
-                for step in range(len(trajectory) - 1):
-                    x_current = torch.FloatTensor(trajectory[step:step+1]).to(self.trainer.device)
-                    
-                    # Prediction: x_k -> z_k -> z_k+1 -> x_k+1
-                    _, _, _, x_next_pred = self.trainer.model.forward_prediction(x_current)
-                    pred_traj.append(x_next_pred.cpu().numpy())
-                
-                predictions.append(np.vstack(pred_traj))
-        
-        # Create time axis for predictions (starts from step 1)
-        pred_time_axis = np.arange(1, time_points)
-        
+
+                if k_steps <= 1:
+                    # One-step ahead for each timestep
+                    for step in range(time_points - 1):
+                        x_current = torch.FloatTensor(trajectory[step:step+1]).to(self.trainer.device)
+                        _, _, _, x_next_pred = self.trainer.model.forward_prediction(x_current)
+                        pred_traj.append(x_next_pred.cpu().numpy())
+                    predictions.append(np.vstack(pred_traj))
+                else:
+                    # K-step ahead: from each time t, predict t+K using multi-step latent rollout
+                    for step in range(time_points - k_steps):
+                        x_current = torch.FloatTensor(trajectory[step:step+1]).to(self.trainer.device)
+                        _, _, _, pred_states = self.trainer.model.forward_multistep_prediction(x_current, k_steps)
+                        x_k_plus_K = pred_states[-1]
+                        pred_traj.append(x_k_plus_K.cpu().numpy())
+                    predictions.append(np.vstack(pred_traj))
+
+        # Time axis alignment
+        if k_steps <= 1:
+            pred_time_axis = np.arange(1, time_points)
+        else:
+            pred_time_axis = np.arange(k_steps, time_points)
+
         # Plot a few sample trajectories
         n_sample = min(5, num_traj)
         indices = np.random.choice(num_traj, n_sample, replace=False)
-        
+
         # Create subplots for each coordinate
         fig, axes = plt.subplots(self.state_dim, 1, figsize=(12, 4*self.state_dim))
         if self.state_dim == 1:
             axes = [axes]
-        
+
         colors = plt.cm.Set1(np.linspace(0, 1, n_sample))
-        
+
         for coord_idx, state_name in enumerate(self.state_names):
             ax = axes[coord_idx]
-            
+
             for traj_idx, color in zip(indices, colors):
                 # Original trajectory (full length)
                 time_axis = np.arange(time_points)
-                ax.plot(time_axis, test_trajectories[traj_idx, :, coord_idx], 
-                       color=color, alpha=0.8, linewidth=2, 
-                       label=f'Original Traj {traj_idx}' if coord_idx == 0 else "")
-                
-                # Dynamics predictions (one step ahead for each time step)
-                ax.plot(pred_time_axis, predictions[traj_idx][:, coord_idx], 
-                       color=color, alpha=0.6, linewidth=1, linestyle='--',
-                       label=f'Dynamics Prediction Traj {traj_idx}' if coord_idx == 0 else "")
-            
+                ax.plot(
+                    time_axis,
+                    test_trajectories[traj_idx, :, coord_idx],
+                    color=color,
+                    alpha=0.8,
+                    linewidth=2,
+                    label=f'Original Traj {traj_idx}' if coord_idx == 0 else "",
+                )
+
+                # K-step ahead predictions (aligned to t+K)
+                label = (
+                    f'{k_steps}-Step Prediction Traj {traj_idx}' if coord_idx == 0 else ""
+                )
+                ax.plot(
+                    pred_time_axis,
+                    predictions[traj_idx][:, coord_idx],
+                    color=color,
+                    alpha=0.6,
+                    linewidth=1,
+                    linestyle='--',
+                    label=label,
+                )
+
             ax.set_xlabel('Time Step')
             ax.set_ylabel(f'{state_name}')
-            ax.set_title(f'{state_name} Coordinate: Original vs Dynamics Predictions')
+            title_suffix = f"K={k_steps}" if k_steps > 1 else "One-Step"
+            ax.set_title(f'{state_name} Coordinate: Original vs {title_suffix} Dynamics Predictions')
             ax.grid(True, alpha=0.3)
-            
-            # Add legend only for the first subplot
+
             if coord_idx == 0:
                 ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        
+
         plt.tight_layout()
-        plt.savefig(self.plots_dir / 'dynamics_prediction_comparison.png', 
-                   dpi=300, bbox_inches='tight')
+        plt.savefig(self.plots_dir / 'dynamics_prediction_comparison.png', dpi=300, bbox_inches='tight')
         plt.close()
-        
-        print(f"Dynamics prediction comparison plot saved to: {self.plots_dir / 'dynamics_prediction_comparison.png'}")
+
+        print(
+            f"Dynamics prediction comparison plot saved to: {self.plots_dir / 'dynamics_prediction_comparison.png'}"
+        )
     
     def save_evaluation_results(self, results: Dict[str, Any]):
         """Save evaluation results to JSON file."""
