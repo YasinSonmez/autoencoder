@@ -137,7 +137,8 @@ class StateAutoencoder(nn.Module):
                     self.latent_dynamics = nn.Linear(self.latent_dim, self.latent_dim, bias=False)
                     # Initialize with identity matrix and optionally freeze updates
                     with torch.no_grad():
-                        self.latent_dynamics.weight.copy_(torch.eye(self.latent_dim))
+                        # self.latent_dynamics.weight.copy_(torch.eye(self.latent_dim))
+                        self.latent_dynamics.weight.copy_(torch.zeros(self.latent_dim, self.latent_dim))
                     # Default behavior: keep A fixed to identity (no updates during training)
                     freeze_A = dynamics_config.get('freeze_A', True)
                     if freeze_A:

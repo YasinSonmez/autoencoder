@@ -93,6 +93,13 @@ class BaseStateTrainer:
             return self.criterion(reconstruction, batch)
         
         elif self.mode == 'prediction':
+            # Optional Brunton-style composite losses
+            if self.config.get('training.losses.enable', False):
+                losses = self._compute_brunton_style_losses(batch_data)
+                total = losses['total']
+                if return_components:
+                    return total, losses
+                return total
             k_steps = getattr(self, 'k_steps', 1)
             
             if k_steps == 1:
@@ -120,6 +127,103 @@ class BaseStateTrainer:
         
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
+
+    def _compute_brunton_style_losses(self, batch_data):
+        """Compute Brunton-style composite losses with switches.
+        
+        L_total = α1·(L_recon + L_pred) + L_lin + α2·L_inf + α3·||W||_2^2
+        """
+        cfg_losses = self.config.get('training.losses', {}) or {}
+        use_recon = cfg_losses.get('use_reconstruction', True)
+        use_pred = cfg_losses.get('use_prediction', True)
+        use_lin = cfg_losses.get('use_latent_linearity', True)
+        use_linf = cfg_losses.get('use_l_inf', True)
+        use_w2 = cfg_losses.get('use_weight_decay_regularizer', False)
+
+        alpha1 = float(cfg_losses.get('alpha1', 0.1))
+        alpha2 = float(cfg_losses.get('alpha2', 1e-7))
+        alpha3 = float(cfg_losses.get('alpha3', 1e-15))
+
+        # Steps
+        sp_default = self.config.get('training.prediction.prediction_steps', 1)
+        S_p = int(cfg_losses.get('S_p', sp_default))
+        effective_steps = max(1, min(S_p, getattr(self, 'k_steps', 1)))
+
+        # Unpack batch
+        if getattr(self, 'k_steps', 1) == 1:
+            x_k = batch_data[0].to(self.device)
+            x_futures = [batch_data[1].to(self.device)]
+        else:
+            x_k = batch_data[0].to(self.device)
+            x_futures = [batch_data[i+1].to(self.device) for i in range(self.k_steps)]
+
+        # Recon
+        z_k = self.model.encode(x_k)
+        x_k_recon = self.model.decode(z_k)
+        L_recon = self.criterion(x_k_recon, x_k) if use_recon else torch.tensor(0.0, device=self.device)
+
+        # Prediction and latent linearity
+        L_pred_terms = []
+        L_lin_terms = []
+
+        # Multi-step rollout in latent
+        z_roll = z_k
+        pred_states = []
+        for m in range(effective_steps):
+            z_roll = self.model.predict_latent(z_roll)
+            x_m_pred = self.model.decode(z_roll)
+            pred_states.append(x_m_pred)
+            # Target x_{k+m+1}
+            target_x = x_futures[m] if m < len(x_futures) else None
+            if target_x is not None:
+                if use_pred:
+                    L_pred_terms.append(self.criterion(x_m_pred, target_x))
+                if use_lin:
+                    z_true = self.model.encode(target_x)
+                    L_lin_terms.append(self.criterion(z_roll, z_true))
+
+        L_pred = (sum(L_pred_terms) / len(L_pred_terms)) if (use_pred and L_pred_terms) else torch.tensor(0.0, device=self.device)
+        L_lin = (sum(L_lin_terms) / len(L_lin_terms)) if (use_lin and L_lin_terms) else torch.tensor(0.0, device=self.device)
+
+        # L_inf: max abs error of recon and m-step predictions
+        L_inf = torch.tensor(0.0, device=self.device)
+        if use_linf:
+            recon_err = torch.abs(x_k - x_k_recon)
+            recon_inf = torch.amax(recon_err)
+            m_for_inf = int(cfg_losses.get('l_inf_m_steps', 1))
+            m_for_inf = max(0, min(m_for_inf, len(pred_states)))
+            pred_inf_total = torch.tensor(0.0, device=self.device)
+            for m in range(m_for_inf):
+                target_x = x_futures[m]
+                pred_err = torch.abs(pred_states[m] - target_x)
+                pred_inf_total = pred_inf_total + torch.amax(pred_err)
+            L_inf = recon_inf + pred_inf_total
+
+        # ||W||_2^2 over selected modules
+        W2 = torch.tensor(0.0, device=self.device)
+        if use_w2:
+            targets = cfg_losses.get('weight_decay_targets', ['encoder', 'decoder'])
+            modules = []
+            if 'encoder' in targets:
+                modules.append(self.model.encoder)
+            if 'decoder' in targets:
+                modules.append(self.model.decoder)
+            if 'latent_dynamics' in targets and self.model.latent_dynamics is not None:
+                modules.append(self.model.latent_dynamics)
+            for module in modules:
+                for p in module.parameters():
+                    if p.requires_grad:
+                        W2 = W2 + torch.sum(p.pow(2))
+
+        total = alpha1 * (L_recon + L_pred) + L_lin + alpha2 * L_inf + alpha3 * W2
+        return {
+            'total': total,
+            'reconstruction': L_recon,
+            'prediction': L_pred,
+            'linearity': L_lin,
+            'linf': L_inf,
+            'w2': W2,
+        }
     
     def train_epoch(self):
         """Train for one epoch."""

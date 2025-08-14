@@ -1,0 +1,126 @@
+# Lorenz System - State-Space Manifold Learning with Comparison Mode
+system_name: "lorenz_manifold"
+
+# Training Mode: "reconstruction", "prediction", or "comparison"
+mode: "prediction"
+
+# Lorenz System Definition
+dynamics:
+  type: "lorenz"
+  parameters:
+    sigma: 10.0
+    rho: 28.0
+    beta: 2.667
+
+# Initial Conditions Sampling
+initial_conditions:
+  bounds:
+    x: [-15.0, 15.0]
+    y: [-20.0, 20.0] 
+    z: [5.0, 35.0]
+  num_samples: 500
+  sampling_method: "grid"
+
+# Trajectory Generation
+trajectory:
+  time_span: [0.0, 5.0]
+  time_points: 500
+  solver: "RK45"
+  rtol: 0.00000001
+  atol: 0.0000000001
+  normalize: true
+  remove_transient: 0
+
+# Dataset Configuration
+dataset:
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  shuffle: true
+  random_seed: 42
+
+# State-Space Autoencoder (2D -> 3D manifold with linear dynamics)
+autoencoder:
+  latent_dim: 10
+  
+  encoder:
+    hidden_layers: [64, 32]
+    activation: "relu"
+    dropout: 0.0
+    batch_norm: false
+  
+  decoder:
+    hidden_layers: [32, 64]
+    activation: "relu"
+    dropout: 0.0
+    batch_norm: false
+    output_activation: "linear"
+  
+  # Linear latent dynamics: z_k+1 = A * z_k
+  latent_dynamics:
+    linear: true  # Enable linear latent dynamics
+    freeze_A: false
+    allow_single_diagonal_variable: false
+    # Note: When linear=true, hidden_layers, activation, dropout are ignored
+
+# Training Configuration
+training:
+  batch_size: 512
+  epochs: 50
+  learning_rate: 0.001
+  optimizer: "adam"
+  scheduler:
+    type: "step"
+    step_size: 40
+    gamma: 0.7
+  loss_function: "mse"
+  early_stopping:
+    patience: 20
+    min_delta: 0.000001
+  save_best_model: true
+  losses:
+    enable: true
+    use_reconstruction: true
+    use_prediction: true
+    use_latent_linearity: true
+    use_l_inf: true
+    use_weight_decay_regularizer: true
+    alpha1: 0.1
+    alpha2: 1e-7
+    alpha3: 1e-15
+    S_p: 30              # defaults to training.prediction.prediction_steps
+    l_inf_m_steps: 1     # how many m to include in L_inf (default 1)
+    weight_decay_targets: [encoder, decoder, latent_dynamics]
+  
+  # Prediction mode settings
+  prediction:
+    reconstruction_weight: 1.0  # Weight for reconstruction loss
+    prediction_weight: 100.0      # Weight for prediction loss
+    
+    # Multi-step prediction settings
+    prediction_steps: 10         # Number of future steps to predict
+    plot_prediction_steps: 10
+    decay_factor: 0.9          # Exponential decay factor
+
+# Evaluation Configuration
+evaluation:
+  metrics:
+    - "reconstruction_error"
+    - "manifold_quality"
+    - "pca_comparison"
+  
+  visualization:
+    plot_manifold: true
+    plot_reconstruction: true
+    plot_trajectories: true
+    save_plots: true
+    plot_format: "png"
+    dpi: 300
+
+# Output Configuration
+output:
+  base_dir: "results"
+  experiment_name: "lorenz_linear_manifold"
+  save_model: true
+  save_embeddings: true
+  generate_report: true 
