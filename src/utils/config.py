@@ -84,6 +84,32 @@ class Config:
         ae = self.config['autoencoder']
         if 'latent_dim' not in ae:
             raise ValueError("Autoencoder latent dimension must be specified")
+        
+        # Validate latent dynamics configuration if present
+        if 'latent_dynamics' in ae:
+            dynamics = ae['latent_dynamics']
+            
+            # Check for mutual exclusivity of dynamics types
+            dynamics_types = []
+            if dynamics.get('linear', False):
+                dynamics_types.append('linear')
+            if dynamics.get('monotonic', False):
+                dynamics_types.append('monotonic')
+            
+            if len(dynamics_types) > 1:
+                raise ValueError(f"Only one dynamics type can be enabled. Found: {dynamics_types}")
+            
+            # Validate monotonic dynamics configuration
+            if dynamics.get('monotonic', False):
+                if 'monotonic_hidden_layers' in dynamics:
+                    hidden_layers = dynamics['monotonic_hidden_layers']
+                    if not isinstance(hidden_layers, list) or len(hidden_layers) == 0:
+                        raise ValueError("monotonic_hidden_layers must be a non-empty list")
+                
+                if 'weight_reparam' in dynamics:
+                    valid_reparams = ["squared", "exponential", "softplus", "absolute"]
+                    if dynamics['weight_reparam'] not in valid_reparams:
+                        raise ValueError(f"Invalid weight_reparam: {dynamics['weight_reparam']}. Must be one of {valid_reparams}")
     
     def _validate_training(self):
         """Validate training configuration."""
@@ -133,9 +159,8 @@ class Config:
         exp_name = self.get('output.experiment_name', 'experiment')
         
         # Use the cached timestamp generated at initialization
-        
-        mode = self.get('mode', 'reconstruction')
-        timestamped_name = f"{exp_name}_{mode}_{self._cached_timestamp}"
+        # For unified trainer, use a more appropriate naming scheme
+        timestamped_name = f"{exp_name}_{self._cached_timestamp}"
         
         output_dir = base_dir / exp_name / timestamped_name
         output_dir.mkdir(parents=True, exist_ok=True)

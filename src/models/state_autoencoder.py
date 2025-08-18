@@ -50,6 +50,149 @@ class AlmostIdentityLinear(nn.Module):
         return A
 
 
+class MonotonicNetwork(nn.Module):
+    """Neural network with monotonic dynamics enforced through non-negative weights.
+    
+    This network ensures monotonicity by using bounded activation functions (tanh) and
+    enforcing non-negative weights through reparameterization techniques.
+    """
+    
+    def __init__(
+        self,
+        latent_dim: int,
+        hidden_layers: list[int] = [32, 32],
+        weight_reparam: str = "squared",
+        requires_grad: bool = True
+    ) -> None:
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.hidden_layers = hidden_layers
+        self.weight_reparam = weight_reparam
+        self.requires_grad = requires_grad
+        
+        # Validate weight reparameterization method
+        valid_reparams = ["squared", "exponential", "softplus", "absolute"]
+        if weight_reparam not in valid_reparams:
+            raise ValueError(f"Invalid weight_reparam: {weight_reparam}. Must be one of {valid_reparams}")
+        
+        # Build network layers
+        self.layers = nn.ModuleList()
+        prev_dim = latent_dim
+        
+        for hidden_dim in hidden_layers:
+            # Create layer with reparameterized weights
+            layer = self._create_reparametrized_layer(prev_dim, hidden_dim)
+            self.layers.append(layer)
+            prev_dim = hidden_dim
+        
+        # Final layer back to latent space
+        final_layer = self._create_reparametrized_layer(prev_dim, latent_dim)
+        self.layers.append(final_layer)
+    
+    def _create_reparametrized_layer(self, in_dim: int, out_dim: int) -> nn.Module:
+        """Create a layer with reparameterized weights for non-negativity."""
+        if self.weight_reparam == "squared":
+            return SquaredWeightLayer(in_dim, out_dim, requires_grad=self.requires_grad)
+        elif self.weight_reparam == "exponential":
+            return ExponentialWeightLayer(in_dim, out_dim, requires_grad=self.requires_grad)
+        elif self.weight_reparam == "softplus":
+            return SoftplusWeightLayer(in_dim, out_dim, requires_grad=self.requires_grad)
+        elif self.weight_reparam == "absolute":
+            return AbsoluteWeightLayer(in_dim, out_dim, requires_grad=self.requires_grad)
+        else:
+            raise ValueError(f"Unknown weight reparameterization: {self.weight_reparam}")
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the monotonic network."""
+        current = x
+        for i, layer in enumerate(self.layers):
+            current = layer(current)
+            # Apply tanh activation between layers (except after the last layer)
+            if i < len(self.layers) - 1:
+                current = torch.tanh(current)
+        return current
+    
+    def __len__(self) -> int:
+        """Return the number of layers in the network."""
+        return len(self.layers)
+
+
+class SquaredWeightLayer(nn.Module):
+    """Linear layer with weights reparameterized as w = x² to ensure non-negativity."""
+    
+    def __init__(self, in_dim: int, out_dim: int, requires_grad: bool = True):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        
+        # Initialize raw parameters so that after squaring, we get reasonable initial weights
+        # We want initial weights around 0.1, so initialize raw_weight around sqrt(0.1) ≈ 0.316
+        self.raw_weight = nn.Parameter(torch.randn(out_dim, in_dim) * 0.316 + 0.316, requires_grad=requires_grad)
+        self.bias = nn.Parameter(torch.zeros(out_dim), requires_grad=requires_grad)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Square the raw weights to ensure non-negativity
+        weight = self.raw_weight ** 2
+        return torch.nn.functional.linear(x, weight, self.bias)
+
+
+class ExponentialWeightLayer(nn.Module):
+    """Linear layer with weights reparameterized as w = exp(x) to ensure strict positivity."""
+    
+    def __init__(self, in_dim: int, out_dim: int, requires_grad: bool = True):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        
+        # Initialize raw parameters so that after exp, we get reasonable initial weights
+        # We want initial weights around 0.1, so initialize raw_weight around log(0.1) ≈ -2.3
+        self.raw_weight = nn.Parameter(torch.randn(out_dim, in_dim) * 0.1 - 2.3, requires_grad=requires_grad)
+        self.bias = nn.Parameter(torch.zeros(out_dim), requires_grad=requires_grad)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Exponentiate the raw weights to ensure strict positivity
+        weight = torch.exp(self.raw_weight)
+        return torch.nn.functional.linear(x, weight, self.bias)
+
+
+class SoftplusWeightLayer(nn.Module):
+    """Linear layer with weights reparameterized as w = softplus(x) to ensure non-negativity."""
+    
+    def __init__(self, in_dim: int, out_dim: int, requires_grad: bool = True):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        
+        # Initialize raw parameters so that after softplus, we get reasonable initial weights
+        # We want initial weights around 0.1, so initialize raw_weight around log(exp(0.1) - 1) ≈ -2.3
+        self.raw_weight = nn.Parameter(torch.randn(out_dim, in_dim) * 0.1 - 2.3, requires_grad=requires_grad)
+        self.bias = nn.Parameter(torch.zeros(out_dim), requires_grad=requires_grad)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Apply softplus to the raw weights to ensure non-negativity
+        weight = torch.nn.functional.softplus(self.raw_weight)
+        return torch.nn.functional.linear(x, weight, self.bias)
+
+
+class AbsoluteWeightLayer(nn.Module):
+    """Linear layer with weights reparameterized as w = |x| to ensure non-negativity."""
+    
+    def __init__(self, in_dim: int, out_dim: int, requires_grad: bool = True):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        
+        # Initialize raw parameters so that after abs, we get reasonable initial weights
+        # We want initial weights around 0.1, so initialize raw_weight around ±0.1
+        self.raw_weight = nn.Parameter(torch.randn(out_dim, in_dim) * 0.1, requires_grad=requires_grad)
+        self.bias = nn.Parameter(torch.zeros(out_dim), requires_grad=requires_grad)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Apply absolute value to the raw weights to ensure non-negativity
+        weight = torch.abs(self.raw_weight)
+        return torch.nn.functional.linear(x, weight, self.bias)
+
+
 class StateAutoencoder(nn.Module):
     """Autoencoder for individual state points (not trajectories)."""
     
@@ -122,6 +265,18 @@ class StateAutoencoder(nn.Module):
         if self.mode == "prediction":
             dynamics_config = config.get('latent_dynamics', {})
             
+            # Check for mutual exclusivity of dynamics types
+            dynamics_types = []
+            if dynamics_config.get('linear', False):
+                dynamics_types.append('linear')
+            if dynamics_config.get('monotonic', False):
+                dynamics_types.append('monotonic')
+            if not dynamics_config.get('linear', False) and not dynamics_config.get('monotonic', False):
+                dynamics_types.append('nonlinear')
+            
+            if len(dynamics_types) > 1:
+                raise ValueError(f"Only one dynamics type can be enabled. Found: {dynamics_types}")
+            
             # Check if linear latent dynamics is enabled
             if dynamics_config.get('linear', False):
                 # Option: keep A as identity but allow a single diagonal (e.g., 3,3) entry to be learnable
@@ -137,13 +292,28 @@ class StateAutoencoder(nn.Module):
                     self.latent_dynamics = nn.Linear(self.latent_dim, self.latent_dim, bias=False)
                     # Initialize with identity matrix and optionally freeze updates
                     with torch.no_grad():
-                        # self.latent_dynamics.weight.copy_(torch.eye(self.latent_dim))
-                        self.latent_dynamics.weight.copy_(torch.zeros(self.latent_dim, self.latent_dim))
-                    # Default behavior: keep A fixed to identity (no updates during training)
-                    freeze_A = dynamics_config.get('freeze_A', True)
+                        self.latent_dynamics.weight.copy_(torch.eye(self.latent_dim))
+                        # self.latent_dynamics.weight.copy_(torch.zeros(self.latent_dim, self.latent_dim))
+                    # Default behavior: allow A to be updated during training
+                    freeze_A = dynamics_config.get('freeze_A', False)
                     if freeze_A:
                         self.latent_dynamics.weight.requires_grad = False
                     self.linear_dynamics = True
+            
+            # Check if monotonic latent dynamics is enabled
+            elif dynamics_config.get('monotonic', False):
+                # Get monotonic network configuration
+                hidden_layers = dynamics_config.get('monotonic_hidden_layers', [32, 32])
+                weight_reparam = dynamics_config.get('weight_reparam', 'squared')
+                
+                self.latent_dynamics = MonotonicNetwork(
+                    latent_dim=self.latent_dim,
+                    hidden_layers=hidden_layers,
+                    weight_reparam=weight_reparam,
+                    requires_grad=dynamics_config.get('requires_grad', True)
+                )
+                self.linear_dynamics = False
+            
             else:
                 # Nonlinear latent dynamics (original implementation)
                 dynamics_layers = []
@@ -325,6 +495,14 @@ class StateAutoencoder(nn.Module):
                     else:
                         A_matrix = None
                     info['A_matrix'] = A_matrix
+            elif isinstance(self.latent_dynamics, MonotonicNetwork):
+                info['latent_dynamics_type'] = 'monotonic'
+                info['latent_dynamics_layers'] = len(self.latent_dynamics.layers)
+                info['linear_dynamics'] = False  # Add this flag
+                info['monotonic_config'] = {
+                    'hidden_layers': self.latent_dynamics.hidden_layers,
+                    'weight_reparam': self.latent_dynamics.weight_reparam
+                }
             else:
                 info['latent_dynamics_type'] = 'nonlinear'
                 info['latent_dynamics_layers'] = len(self.latent_dynamics)
